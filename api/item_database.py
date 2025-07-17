@@ -1,4 +1,4 @@
-# item_database.py
+# api/item_database.py
 
 ALL_POSSIBLE_ITEMS = {
     "seeds": [
@@ -10,13 +10,13 @@ ALL_POSSIBLE_ITEMS = {
     ],
     "gear": [
         "Watering Can",
-        "Trowel", # Typo diperbaiki dari 'towel'
+        "Trowel",
         "Recall Wrench",
-        "Basic Sprinkler", # Typo diperbaiki dari 'sprinkle'
-        "Advanced Sprinkler", # Typo diperbaiki dari 'sprinkle'
-        "Godly Sprinkler", # Typo diperbaiki dari 'sprinkle'
+        "Basic Sprinkler",
+        "Advanced Sprinkler",
+        "Godly Sprinkler",
         "Lightning Rod",
-        "Master Sprinkler", # Typo diperbaiki dari 'sprinkle'
+        "Master Sprinkler",
         "Favorite Tool",
         "Harvest Tool",
         "Cleaning Spray",

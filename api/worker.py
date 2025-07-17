@@ -1,70 +1,59 @@
-# worker.py
-
+import os
+import json
 import firebase_admin
 from firebase_admin import credentials, firestore, messaging
-from scraper import get_current_stock
+from .scraper import get_current_stock # Jangan lupa titik di depan
 
-# --- Setup Awal ---
-# Inisialisasi Firebase (sama seperti di main.py)
-cred = credentials.Certificate("firebase-credentials.json")
-# Cek apakah aplikasi sudah diinisialisasi untuk menghindari error
-if not firebase_admin._apps:
+# Mengambil kredensial dari Vercel Environment Variables
+# Ini akan membaca 'secret' yang sudah kita setel di Vercel
+cred_json_str = os.environ.get('FIREBASE_CREDENTIALS')
+
+# Inisialisasi Firebase hanya jika kredensial ada
+# dan jika belum pernah diinisialisasi sebelumnya
+if cred_json_str and not firebase_admin._apps:
+    cred_dict = json.loads(cred_json_str)
+    cred = credentials.Certificate(cred_dict)
     firebase_admin.initialize_app(cred)
 
-# Dapatkan akses ke database Firestore
 db = firestore.client()
-# --------------------
-
 
 def check_stock_and_notify():
     """
-    Fungsi utama si penjaga.
-    1. Ambil stok terbaru.
-    2. Ambil semua wishlist dari database.
-    3. Bandingkan, dan kirim notifikasi jika cocok.
+    Fungsi utama yang akan dipanggil untuk mengecek stok dan mengirim notifikasi.
     """
     print("Mulai menjalankan pengecekan stok...")
-
-    # 1. Ambil stok terbaru dari scraper kita
     live_stock = get_current_stock()
     
-    # Jika stok ternyata kosong, tidak ada yang perlu dilakukan
     if not live_stock:
         print("Stok saat ini kosong. Tidak ada notifikasi dikirim.")
         return
 
-    print(f"Stok saat ini: {live_stock}")
-    
-    # Ubah list menjadi Set untuk perbandingan yang lebih cepat
-    live_stock_set = set(live_stock)
+    # Buat Set dari nama item untuk perbandingan yang efisien
+    live_stock_set = {item['name'] for item in live_stock}
+    print(f"Stok saat ini: {live_stock_set}")
 
-    # 2. Ambil semua data device/wishlist dari Firestore
+    # Ambil semua data device/wishlist dari Firestore
     devices_ref = db.collection('devices')
     all_devices = devices_ref.stream()
 
-    # 3. Looping setiap device untuk dicek
+    # Looping setiap device untuk dicek
     for device in all_devices:
         device_data = device.to_dict()
         fcm_token = device.id
         wishlist = device_data.get('wishlist', [])
 
         if not wishlist:
-            continue # Lanjut ke device berikutnya jika wishlist kosong
+            continue
 
-        # Bandingkan wishlist dengan stok yang ada
         wishlist_set = set(wishlist)
+        # Cari item yang cocok antara wishlist dan live stock
         matched_items = live_stock_set.intersection(wishlist_set)
 
-        # Jika ada item yang cocok...
         if matched_items:
-            # Ubah Set kembali menjadi list string
-            matched_items_list = list(matched_items)
-            
-            # Buat pesan notifikasi
-            item_names = ", ".join(matched_items_list)
+            item_names = ", ".join(list(matched_items))
             print(f"NOTIFIKASI UNTUK {fcm_token}: Item favoritmu ada yang stok! -> {item_names}")
             
-            # Kirim notifikasi menggunakan FCM
+            # Buat pesan notifikasi
             message = messaging.Message(
                 notification=messaging.Notification(
                     title='Item Favoritmu Tersedia!',
@@ -73,6 +62,7 @@ def check_stock_and_notify():
                 token=fcm_token,
             )
             
+            # Kirim notifikasi
             try:
                 response = messaging.send(message)
                 print('Notifikasi berhasil dikirim:', response)
@@ -80,8 +70,3 @@ def check_stock_and_notify():
                 print(f'Gagal mengirim notifikasi ke {fcm_token}: {e}')
 
     print("Pengecekan stok selesai.")
-
-
-# --- Bagian untuk menjalankan fungsi ini secara langsung untuk tes ---
-if __name__ == "__main__":
-    check_stock_and_notify()
