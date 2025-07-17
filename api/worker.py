@@ -1,9 +1,9 @@
-# api/worker.py (Versi Final dengan Ingatan & Notifikasi Perubahan)
+# api/worker.py (Versi Final - Logika Hibrida)
 import os
 import json
 import firebase_admin
 from firebase_admin import credentials, firestore, messaging
-from .scraper import get_current_stock
+from .scraper import get_current_stock_grouped # Pastikan import fungsi yang benar
 
 # --- Inisialisasi Firebase ---
 cred_json_str = os.environ.get('FIREBASE_CREDENTIALS')
@@ -14,82 +14,87 @@ if cred_json_str and not firebase_admin._apps:
 db = firestore.client()
 # -----------------------------
 
-def check_stock_and_notify():
+def process_category_with_memory(category_name, current_items_set, all_devices_wishlists):
     """
-    Fungsi final:
-    1. Ambil stok terbaru.
-    2. Ambil stok lama dari database.
-    3. Bandingkan, jika ada item BARU, baru kirim notifikasi.
-    4. Simpan stok terbaru ke database untuk perbandingan berikutnya.
+    Fungsi cerdas untuk SEEDS dan GEAR.
+    Hanya mengirim notifikasi jika stok berubah.
     """
-    print("Mulai menjalankan pengecekan stok cerdas...")
-    
-    # 1. Ambil stok terbaru
-    live_stock_list = get_current_stock()
-    # Ubah ke Set untuk perbandingan. Kita hanya butuh namanya.
-    current_stock_set = {item['name'] for item in live_stock_list}
-    
-    if not current_stock_set:
-        print("Stok saat ini kosong.")
-        return
-
-    # 2. Ambil stok lama dari Firestore
-    previous_stock_ref = db.collection('internal_state').document('last_stock')
+    previous_stock_ref = db.collection('internal_state').document(f'last_stock_{category_name}')
     try:
         previous_stock_doc = previous_stock_ref.get()
-        if previous_stock_doc.exists:
-            previous_stock_set = set(previous_stock_doc.to_dict().get('items', []))
-        else:
-            previous_stock_set = set() # Jika belum ada data sebelumnya
-    except Exception as e:
-        print(f"Gagal mengambil stok lama dari Firestore: {e}")
+        previous_stock_set = set(previous_stock_doc.to_dict().get('items', [])) if previous_stock_doc.exists else set()
+    except Exception:
         previous_stock_set = set()
 
-    # 3. Bandingkan! Cari item yang BARU muncul
-    newly_added_items = current_stock_set - previous_stock_set
-    
-    if not newly_added_items:
-        print("Tidak ada item baru. Tidak ada notifikasi dikirim.")
-        # Tetap simpan stok saat ini untuk menjaga data tetap update
-        previous_stock_ref.set({'items': list(current_stock_set)})
+    # Hanya proses jika stok untuk kategori ini berubah
+    if current_items_set == previous_stock_set:
+        print(f"Stok untuk '{category_name}' tidak berubah.")
         return
-        
-    print(f"Item BARU ditemukan: {newly_added_items}")
 
-    # Ambil semua data device/wishlist dari Firestore
-    devices_ref = db.collection('devices')
-    all_devices = devices_ref.stream()
-
-    # Looping setiap device untuk dicek
-    for device in all_devices:
-        device_data = device.to_dict()
-        fcm_token = device.id
-        wishlist = device_data.get('wishlist', [])
-        if not wishlist: continue
-        
-        wishlist_set = set(wishlist)
-        # Cari item yang cocok antara wishlist dan item BARU
-        matched_items = newly_added_items.intersection(wishlist_set)
-
+    print(f"Stok untuk '{category_name}' berubah! Stok baru: {current_items_set}")
+    
+    # Kirim notifikasi ke user yang relevan
+    for fcm_token, wishlist_set in all_devices_wishlists.items():
+        matched_items = current_items_set.intersection(wishlist_set)
         if matched_items:
             item_names = ", ".join(list(matched_items))
-            print(f"NOTIFIKASI UNTUK {fcm_token}: Item favorit BARU ada di stok! -> {item_names}")
-            
+            print(f"NOTIFIKASI {category_name.upper()} UNTUK {fcm_token}: {item_names}")
             message = messaging.Message(
-                notification=messaging.Notification(
-                    title='Item Favorit Baru Tersedia!',
-                    body=f'Segera cek, ada {item_names} di toko!'
-                ),
+                notification=messaging.Notification(title=f'Stok {category_name.capitalize()} Baru!', body=f'Ada {item_names} di toko!'),
                 token=fcm_token,
             )
             try:
                 messaging.send(message)
-                print(f'Notifikasi untuk {item_names} berhasil dikirim.')
             except Exception as e:
                 print(f'Gagal mengirim notifikasi ke {fcm_token}: {e}')
 
-    # 4. Simpan stok saat ini sebagai stok lama untuk pengecekan berikutnya
-    print("Menyimpan stok saat ini ke database...")
-    previous_stock_ref.set({'items': list(current_stock_set)})
+    # Update ingatan untuk kategori ini
+    previous_stock_ref.set({'items': list(current_items_set)})
+
+def process_category_direct(category_name, current_items_set, all_devices_wishlists):
+    """
+    Fungsi simpel untuk EGG.
+    Selalu mengirim notifikasi jika ada item di wishlist.
+    """
+    print(f"Mengecek stok '{category_name}' secara langsung. Stok saat ini: {current_items_set}")
     
-    print("Pengecekan stok cerdas selesai.")
+    # Langsung kirim notifikasi ke user yang relevan tanpa cek ingatan
+    for fcm_token, wishlist_set in all_devices_wishlists.items():
+        matched_items = current_items_set.intersection(wishlist_set)
+        if matched_items:
+            item_names = ", ".join(list(matched_items))
+            print(f"NOTIFIKASI {category_name.upper()} UNTUK {fcm_token}: {item_names}")
+            message = messaging.Message(
+                notification=messaging.Notification(title=f'Stok {category_name.capitalize()} Tersedia!', body=f'Ada {item_names} di toko!'),
+                token=fcm_token,
+            )
+            try:
+                messaging.send(message)
+            except Exception as e:
+                print(f'Gagal mengirim notifikasi ke {fcm_token}: {e}')
+
+def check_stock_and_notify():
+    print("\n--- Memulai Pengecekan Stok Hibrida ---")
+    
+    # 1. Ambil semua stok, sudah dikelompokkan
+    grouped_stock = get_current_stock_grouped()
+    if not any(grouped_stock.values()):
+        print("Semua stok kosong.")
+        return
+
+    # 2. Ambil semua wishlist dari semua user SEKALI SAJA
+    all_devices_wishlists = {}
+    devices_ref = db.collection('devices')
+    all_devices = devices_ref.stream()
+    for device in all_devices:
+        all_devices_wishlists[device.id] = set(device.to_dict().get('wishlist', []))
+
+    # 3. Proses setiap kategori dengan logika yang berbeda
+    # Gunakan logika "ingatan" untuk seeds dan gear
+    process_category_with_memory('seeds', set(grouped_stock.get('seeds', [])), all_devices_wishlists)
+    process_category_with_memory('gear', set(grouped_stock.get('gear', [])), all_devices_wishlists)
+    
+    # Gunakan logika "langsung" untuk egg
+    process_category_direct('egg', set(grouped_stock.get('egg', [])), all_devices_wishlists)
+
+    print("--- Pengecekan Stok Hibrida Selesai ---\n")
