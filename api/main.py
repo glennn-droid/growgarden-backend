@@ -1,3 +1,4 @@
+# api/main.py (Versi Final Flask untuk Vercel)
 import os
 import json
 import firebase_admin
@@ -8,7 +9,6 @@ from .item_database import ALL_POSSIBLE_ITEMS
 from .worker import check_stock_and_notify
 
 # Mengambil kredensial dari Vercel Environment Variables
-# Pastikan kamu sudah set 'FIREBASE_CREDENTIALS' di dashboard Vercel
 cred_json_str = os.environ.get('FIREBASE_CREDENTIALS')
 
 # Inisialisasi Firebase hanya jika kredensial ada
@@ -21,7 +21,8 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Grow a Garden Notifier API is running."
+    # Endpoint ini bisa kita gunakan untuk UptimeRobot nanti
+    return "API is running."
 
 @app.route("/api/stock")
 def get_live_stock_endpoint():
@@ -34,8 +35,5 @@ def get_all_possible_items_endpoint():
     
 @app.route("/api/trigger-worker")
 def trigger_worker_endpoint():
-    # Pengecekan sederhana untuk memastikan ini dipanggil oleh layanan terpercaya
-    # Di aplikasi nyata, ini bisa menggunakan secret key
-    print("Memicu worker dari endpoint...")
     check_stock_and_notify()
     return jsonify({"status": "worker triggered"}), 200
